@@ -12,11 +12,13 @@ Proposal for Google Summer of Code (GSoC) 2025
   - [Technical Deep Dive](#technical-deep-dive)
     - [1. 3-Way Merge](#1-3-way-merge)
     - [2. AI-Assisted Conflict Resolution](#2-ai-assisted-conflict-resolution)
+      - [Options Considered](#options-considered)
+      - [Assumptions](#assumptions)
+      - [Selected Approach: Code Embedding Model with AST Analysis](#selected-approach-code-embedding-model-with-ast-analysis)
+      - [Why This Approach?](#why-this-approach)
   - [Plan of Action](#plan-of-action)
-    - [Phase 1: Core Functionality Implementation (Weeks 1-8)](#phase-1-core-functionality-implementation-weeks-1-8)
-      - [Deliverables (Phase 1)](#deliverables-phase-1)
-    - [Phase 2 (Weeks 9-12): Advanced Features \& AI Integration](#phase-2-weeks-9-12-advanced-features--ai-integration)
-      - [Deliverables (Phase 2)](#deliverables-phase-2)
+    - [Phase 1: Core Functionality \& Kubebuilder Plugin (Weeks 1-8)](#phase-1-core-functionality--kubebuilder-plugin-weeks-1-8)
+    - [Phase 2: AI Integration, Monorepo Support \& Advanced Features (Weeks 9-12)](#phase-2-ai-integration-monorepo-support--advanced-features-weeks-9-12)
     - [Evaluation Metrics](#evaluation-metrics)
   - [UX Components:](#ux-components)
   - [Proof of Concept: Three-Way Merge in Action](#proof-of-concept-three-way-merge-in-action)
@@ -119,48 +121,64 @@ git config merge.renameLimit 999999
 
 <!-- TODO: add this later ### Kubebuilder conflict pattern analysis -->
 ### 2. AI-Assisted Conflict Resolution
-After researching current AI approaches for code merging, I believe GitHub Copilot offers the most promising path forward for this project:
-Why GitHub Copilot:
-- Already trained on millions of Go repositories
-- Understands Kubernetes patterns and conventions
-- Can analyze context from surrounding code
-- Accessible via API (GitHub Copilot for Business)
+#### Options Considered
+I've explored several approaches for implementing AI-assisted conflict resolution:
 
-Here's how I'd implement AI assistance for conflict resolution:
+Prompt-based LLM approach: Using detailed instructions to guide general-purpose models
+Code embedding models: Using vector representations to understand semantic similarities
+AST-based conflict resolution: Analyzing Abstract Syntax Trees to merge at a structural level
+Historical pattern matching: Building a database of common conflict patterns and solutions
+
+#### Assumptions
+My analysis is based on several key assumptions:
+
+Kubebuilder conflicts often follow predictable patterns (API updates, dependency changes)
+Solution should work without requiring massive proprietary training datasets
+Performance and accuracy are both important for developer experience
+The approach should be practical to implement within GSoC timeframe
+
+#### Selected Approach: Code Embedding Model with AST Analysis
+After evaluating options, I believe a hybrid approach using code embeddings and AST analysis offers the best balance:
 ```go
-// Pseudocode for AI-assisted conflict resolution
+// Pseudocode for embedding-based conflict resolution
 func resolveConflictWithAI(conflict ConflictMarker, surroundingCode string) (string, float64) {
-  // Create a prompt that frames the conflict resolution task
-  prompt := fmt.Sprintf(`
-    I'm trying to resolve a merge conflict in a Kubebuilder project.
-    
-    The original code (BASE) is:
-    %s
-    
-    Our current version (OURS) is:
-    %s
-    
-    The updated scaffold (THEIRS) is:
-    %s
-    
-    The surrounding code for context is:
-    %s
-    
-    Please resolve this conflict by:
-    1. Preserving our custom business logic
-    2. Adopting the updated scaffold structure
-    3. Merging imports and dependencies
-    
-    Provide only the resolved code without explanations.
-    `, conflict.Base, conflict.Ours, conflict.Theirs, surroundingCode)
+  // Parse code into ASTs to understand structure
+  baseAST := parseToAST(conflict.Base)
+  oursAST := parseToAST(conflict.Ours)
+  theirsAST := parseToAST(conflict.Theirs)
   
-  // Send to LLM API
-  resolution, confidence := callLLMAPI(prompt)
+  // Generate embeddings for semantic understanding
+  baseEmbedding := generateCodeEmbedding(conflict.Base)
+  oursEmbedding := generateCodeEmbedding(conflict.Ours)
+  theirsEmbedding := generateCodeEmbedding(conflict.Theirs)
+  
+  // Analyze structural and semantic differences
+  diffMap := analyzeDifferences(baseAST, oursAST, theirsAST, 
+                               baseEmbedding, oursEmbedding, theirsEmbedding)
+  
+  // Generate resolution using the analyzed differences
+  resolution, confidence := generateResolution(diffMap, surroundingCode)
   
   return resolution, confidence
 }
 ```
-I'd implement this as an optional feature, since it requires API keys and may not be suitable for all environments. It would serve as a fallback when rule-based approaches fail.
+
+#### Why This Approach?
+1. Structural Understanding: Using ASTs allows us to understand code at a semantic level
+2. Language Agnostic: Works with any programming language with an AST parser
+3. No Proprietary Dependencies: Can be implemented using open-source libraries
+4. Higher Precision: Focused specifically on code structure, not general text patterns
+5. More Deterministic: Less prone to the "hallucination" issues of pure LLM approaches
+
+For implementation, I'd use:
+
+- CodeBERT or similar open-source models for generating code embeddings
+- Go's built-in AST package for structural analysis
+- A scoring system that weights changes based on their impact and complexity
+
+This would be implemented as an optional feature that enhances the base three-way merge functionality.
+
+I'm fully open to discussing alternative approaches! If the mentors feel that a prompt-based approach with GitHub Copilot or another service would be more practical, I'm ready to adapt. The architecture will be designed to allow different resolution strategies to be plugged in as the project evolves.
 
 
 
@@ -211,68 +229,52 @@ flowchart TD
     end
 ```
 
-### Phase 1: Core Functionality Implementation (Weeks 1-8)
+### Phase 1: Core Functionality & Kubebuilder Plugin (Weeks 1-8)
 
-Week 1-2 : Research and architecture
-- Deep dive into github's three-way merge capabilities
-- Identify conflict patterns in kubebuilder projects
-- Finalize architecture and design
-- Establish evaluation metrics
+| Week | Tasks | Deliverables |
+|------|-------|-------------|
+| 1 | - Deep dive into Git's three-way merge capabilities<br>- Analyze Kubebuilder codebase for scaffolding mechanisms<br>- Research common conflict patterns in Kubebuilder updates | - Technical spec document<br>- Decision document for merge strategies<br>- Initial project repository setup |
+| 2 | - Design architecture for version detection<br>- Prototype scaffold generation for different Kubebuilder versions<br>- Identify key test cases | - Architecture document<br>- Working prototype for version detection<br>- Test matrix covering key upgrade scenarios |
+| 3 | - Implement version detection from PROJECT file<br>- Build core scaffold generation for original version<br>- Create GitHub Action skeleton | - Working version detection module<br>- Scaffold generation system<br>- Initial GitHub Action workflow file |
+| 4 | - Implement scaffold generation for target versions<br>- Complete GitHub Action core workflow<br>- Create test projects with customizations | - End-to-end scaffold generation<br>- Working GitHub Action (basic functionality)<br>- Test suite of modified Kubebuilder projects |
+| 5 | - Develop optimized merge strategies for Go files<br>- Implement custom merge drivers for Kubebuilder-specific files<br>- Design PR structure and templates | - Custom merge strategies<br>- Three-way merge implementation<br>- PR template system |
+| 6 | - Implement semantic-aware merging for manifests<br>- Create conflict categorization system<br>- Integrate all components into complete workflow | - Enhanced merge system for YAML/manifests<br>- Conflict categorization module<br>- Integrated end-to-end workflow |
+| 7 | - Begin Kubebuilder plugin development<br>- Design plugin interface<br>- Implement scaffolding for GitHub Action | - Plugin architecture document<br>- Initial plugin implementation<br>- Scaffolding system for GitHub Action |
+| 8 | - Complete Kubebuilder plugin integration<br>- Implement configuration via .kubebuilder-update.yaml<br>- Comprehensive testing across scenarios | - Completed Kubebuilder plugin<br>- Configuration system<br>- End-to-end testing results |
 
-Week 3-4 : Base Implementation
-- Develop version detection and scaffold generation components
-- Implement basic three-way merge functionality
-- Create initial GitHub Action workflow structure
-- Set up test repository for validation
+### Phase 2: AI Integration, Monorepo Support & Advanced Features (Weeks 9-12)
 
-Week 5-6: Merge Enhancement & Conflict Handling
-- Develop custom merge strategies for Go files
-- Implement semantic-aware merging for Kubebuilder-specific files
-- Create conflict pattern detection and categorization
-- Design conflict reporting and visualization
-
-Week 7-8: Integration & Initial Testing
-- Integrate all components into complete GitHub Action
-- Develop configuration system via .kubebuilder-update.yaml
-- Create PR templates with clear change summaries
-- Perform testing across multiple Kubebuilder versions
-
-#### Deliverables (Phase 1)
-1. Functional GitHub Action that:
-   - Detects new Kubebuilder releases
-   - Generates scaffolds for original and new versions
-   - Performs three-way merges
-   - Creates PRs with change summaries
-2. Documentation for setup and configuration
-3. Test suite validating functionality across scenarios
-
-### Phase 2 (Weeks 9-12): Advanced Features & AI Integration
-
-Week 9-10: AI Conflict Resolution Research
-- Research possible AI code conflict resolution
-- Evaluate GitHub Copilot and other LLM-based resolution tools
-- Create prototype integrations with selected AI tools
-- Test AI resolution on common conflict patterns
-
-Week 11-12: Kubebuilder Plugin & Refinement
-- Define a `--output` directory and config for monorepos
-- Develop Kubebuilder plugin that scaffolds the GitHub Action
-- Implement extended configuration options
-- Final documentation and polishing
-
-#### Deliverables (Phase 2)
-1. Research report on AI-assisted conflict resolution
-2. Kubebuilder plugin (alpha feature) for easy Action setup
-3. Enhanced conflict resolution strategies
-4. Comprehensive documentation and examples
+| Week | Tasks | Deliverables |
+|------|-------|-------------|
+| 9 | - Research AI code conflict resolution approaches<br>- Evaluate GitHub Copilot API and other tools<br>- Explore embedding models for code understanding | - AI approach research document<br>- Evaluation of available tools<br>- Decision on AI implementation strategy |
+| 10 | - Prototype selected AI conflict resolution approach<br>- Create benchmark for conflict resolution quality<br>- Build integration with existing workflow | - AI resolution prototype<br>- Benchmark suite for resolution quality<br>- Integration design document |
+| 11 | - Define and implement output directory for monorepos<br>- Add monorepo support to plugin and GitHub Action<br>- Implement configuration options for monorepos | - Monorepo support<br>- Enhanced plugin with monorepo handling<br>- Monorepo configuration system |
+| 12 | - Create comprehensive user documentation<br>- Develop example projects for different scenarios<br>- Final testing and refinement<br>- Create demo video | - Complete user documentation<br>- Example projects and workflows<br>- Final test results<br>- Demo showcasing the complete workflow |
 
 ### Evaluation Metrics
 I'll measure success using these metrics:
-- Clean PR Rate: Percentage of PRs generated without conflicts
-- Conflict Resolution Rate: Percentage of conflicts that can be automatically resolved
-- Time Savings: Average time saved compared to manual updates
-- Test Pass Rate: Percentage of generated PRs that pass all tests
-- Adoption Rate: Number of projects using the tool
+1. Conflict Isolation Accuracy
+   - Target: >95% of conflicts should ONLY occur in user-modified code sections, not in standard scaffold boilerplate
+   - Methodology: Test against 10+ Kubebuilder projects with varying customization patterns across different version jumps
+   - Success Criteria: When running the tool on projects with known modification patterns, conflicts are strictly limited to areas where users added custom logic
+
+2. Resolution Effectiveness
+   - Target: Complete end-to-end updates across at least 3 different version jumps (e.g., v3.6→v3.8, v3.8→v4.0, v4.0→v4.4)
+   - Methodology: Create a test suite of deliberately modified Kubebuilder projects and verify:
+     - Standard scaffold updates apply cleanly
+     - User customizations remain intact and functional
+     - Project builds successfully post-update
+   - Success Criteria: 80% of test cases update successfully with all original functionality preserved
+
+3. Real-world Validation
+   - Target: 5+ real-world projects successfully updated with minimal developer intervention
+   - Methodology: Partner with project maintainers to test on their codebases; document time spent in manual conflict resolution
+   - Success Criteria: At least 70% reduction in update time compared to manual re-scaffolding process
+
+4. Developer Experience
+   - Target: PR descriptions provide actionable context for >90% of conflicts requiring human review
+   - Methodology: Blind evaluation by Kubebuilder maintainers - measuring their ability to understand and resolve conflicts based solely on PR descriptions
+   - Success Criteria: Maintainers can correctly identify and resolve conflicts in under 5 minutes per file on average
 
 ## UX Components:
 I've designed how the PR experience will look for maintainers, focusing on clarity and actionability:
