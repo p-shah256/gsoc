@@ -21,7 +21,10 @@ Proposal for Google Summer of Code (GSoC) 2025
     - [Phase 2: AI Integration, Monorepo Support \& Advanced Features (Weeks 9-12)](#phase-2-ai-integration-monorepo-support--advanced-features-weeks-9-12)
     - [Evaluation Metrics](#evaluation-metrics)
   - [UX Components:](#ux-components)
-  - [Proof of Concept: Three-Way Merge in Action](#proof-of-concept-three-way-merge-in-action)
+  - [Proof of Concept: Three-Way Merge in Action on RabbitMQ Operator](#proof-of-concept-three-way-merge-in-action-on-rabbitmq-operator)
+    - [The Problem Solved](#the-problem-solved)
+    - [Real Results from a Production Codebase](#real-results-from-a-production-codebase)
+    - [Limitations \& Next Steps](#limitations--next-steps)
   - [Commitments](#commitments)
     - [Additional Information about the Timeline](#additional-information-about-the-timeline)
     - [Post-GSoC Plans](#post-gsoc-plans)
@@ -306,66 +309,71 @@ I've designed how the PR experience will look for maintainers, focusing on clari
 ```
 The PR description focuses on providing a clear summary of what's changed and highlighting exactly where human attention is needed. This saves developers time by directing them straight to conflict areas.
 
-## Proof of Concept: Three-Way Merge in Action
-To validate the technical approach, I've created a working proof-of-concept demonstrating how the three-way merge preserves customizations while applying scaffold updates: [link to POC repo](https://github.com/p-shah256/poc-gsoc-kubebuilder). The POC simulates:
-- A base Kubebuilder project (v3.8.0)
-- A customized version with business logic added
-- An updated scaffold (v3.9.0) with new patterns
+## Proof of Concept: Three-Way Merge in Action on RabbitMQ Operator
+To validate the technical approach, I've implemented a working proof-of-concept using a production Kubernetes operator (RabbitMQ Cluster Operator). This demonstrates how three-way merging preserves years of complex business logic while applying scaffold updates: [RabbitMQ cluster operator fork](https://github.com/p-shah256/cluster-operator)
 
-When the three-way merge runs, it automatically:
+### The Problem Solved
+RabbitMQ's operator was built with Kubebuilder v3, but upgrading to v4 would normally require painful manual work or risky automation. My approach solves this by:
 
-- Updates the non-conflicting parts (PROJECT file version, improved error handling)
-- Identifies conflicts between customizations and scaffold changes
-- Preserves both the custom code and the updated scaffold structure
+1. Identifying the base scaffold version
+2. Creating a three-way merge structure
 
-Here's what the conflict resolution looks like in practice:
-``` go
-@@@ -21,25 -21,36 +21,46 @@@ type DeploymentReconciler struct 
- // Reconcile is part of the main kubernetes reconciliation loop
- func (r *DeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
- 	log := log.FromContext(ctx)
--	
-+	// Initialize results
-+	result := ctrl.Result{}
-+
- 	// Fetch the Deployment instance
- 	deployment := &appsv1.Deployment{}
--	if err := r.Get(ctx, req.NamespacedName, deployment); err != nil {
-+	err := r.Get(ctx, req.NamespacedName, deployment)
-+	if err != nil {
- 		if errors.IsNotFound(err) {
- 			// Object not found, return
--			return ctrl.Result{}, nil
-+			return result, nil
- 		}
- 		// Error reading the object
--		return ctrl.Result{}, err
-+		log.Error(err, "unable to fetch Deployment")
-+		return result, client.IgnoreNotFound(err)
- 	}
-
-+<<<<<<< HEAD
-+	// Custom reconciliation logic
-+if err := r.customReconcile(ctx, deployment); err != {
-+  log.Error(err, "failed to reconcile deployment")
-+  return ctrl.Result{}, err
-+}
-+||||||| bc77bb3
-+	// Implement reconciliation logic here
-+=======
-+	// Implement your reconciliation logic here
-+>>>>>>> updated
- 	log.Info("Reconciling Deployment", "namespace", deployment.Namespace, "name", deployment.Name)
+```mermaid
+graph LR
+    A[First Commit] --> B(v3 Scaffold)
+    B --> C(v4 Scaffold)
+    B --> G(<i>2600+ commits...</i>)
+    G --> D(RabbitMQ Main Branch)
+    C --> E(Three-Way Merge)
+    D --> E
+    E --> F(Upgraded Operator)
 ```
-I've created a working POC demonstrating the three-way merge approach at [link to POC repo](https://github.com/p-shah256/poc-gsoc-kubebuilder). You can clone the repo and run `./merge-update.sh` to see how the system preserves customizations while applying scaffold updates. The conflict visualization clearly shows how custom code and scaffold improvements can be merged intelligently.
+### Real Results from a Production Codebase
+Running the POC against RabbitMQ's operator (2600+ commits) successfully identified conflicts that need resolution while automatically applying non-conflicting improvements:
 
-![alt text](image.png)
-This demonstration proves the viability of using three-way merges to update Kubebuilder projects. The full implementation would automate the remaining steps:
-1. Generating the original scaffold from the recorded version
-2. Generating the updated scaffold with the latest Kubebuilder release
-3. Creating a PR with these changes and clear documentation of conflicts
+```
+<<<<<<< v4-scaffold
+# Code generated by tool. DO NOT EDIT.
+# This file is used to track the info used to scaffold your project
+# and allow the plugins properly work.
+# More info: https://book.kubebuilder.io/reference/project-config.html
+domain: rabbitmq.com
+layout:
+- go.kubebuilder.io/v4
+projectName: cluster-operator
+repo: github.com/rabbitmq/cluster-operator
+=======
+domain: rabbitmq.com
+layout:
+- go.kubebuilder.io/v3
+projectName: cluster-operator
+repo: github.com/rabbitmq/cluster-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: rabbitmq.com
+  group: rabbitmq.com
+  kind: RabbitmqCluster
+  path: github.com/rabbitmq/cluster-operator/api/v1beta1
+  version: v1beta1
+>>>>>>> main
+version: "3"
+```
 
-The POC confirms that the approach preserves custom code while allowing adoption of improved scaffolding patterns with minimal manual intervention.
+### Limitations & Next Steps
+While this POC successfully demonstrates the core merge algorithm, there are a few rough edges to acknowledge:
+
+1. The current implementation requires manual setup of the three-way merge structure (creating the base scaffold branch)
+2. The merge results show inverted HEAD markers (v4-scaffold shown as the base instead of main)
+3. Intelligent conflict resolution is needed to handle complex cases where Kubebuilder drastically changed a file's structure
+
+These limitations actually reinforce why automating this process would be valuable - managing these edge cases manually across dozens of files would be painful and error-prone for maintainers.
+In the full implementation, I'd:
+
+1. Automatically detect and create the appropriate scaffold base
+2. Ensure proper merge direction for intuitive conflict resolution
 
 ## Commitments
 
